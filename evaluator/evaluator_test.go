@@ -1,6 +1,7 @@
 package evaluator
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/al-keio/monkey-go/lexer"
@@ -320,23 +321,143 @@ func TestBuiltinFunctions(t *testing.T) {
 		{`len("hello world")`, 11},
 		{`len(1)`, "argument to `len` not supported, got INTEGER"},
 		{`len("one", "two")`, "wrong number of arguments. got=2, want=1"},
+		{`len([])`, 0},
+		{`len([1, 2, 3])`, 3},
+		{`len([1, 2, false, true])`, 4},
+		{`first(["foo", 2, true])`, "foo"},
+		{`first([2, true, "foo"])`, 2},
+		{`first([true, "foo", 2])`, true},
+		{`first([])`, nil},
+		{`first()`, "wrong number of arguments. got=0, want=1"},
+		{`first(1, 2)`, "wrong number of arguments. got=2, want=1"},
+		{`first(1)`, "argument to `first` must be Array, got INTEGER"},
+		{`last(["foo", 2, true])`, true},
+		{`last([2, true, "foo"])`, "foo"},
+		{`last([true, "foo", 2])`, 2},
+		{`last([])`, nil},
+		{`last()`, "wrong number of arguments. got=0, want=1"},
+		{`last(1, 2)`, "wrong number of arguments. got=2, want=1"},
+		{`last(1)`, "argument to `last` must be Array, got INTEGER"},
+		{`rest(["foo", 2, true])`, `[2, true]`},
+		{`rest([2, true, "foo"])`, `[true, "foo"]`},
+		{`rest([true, "foo", 2])`, `["foo", 2]`},
+		{`rest([1])`, "[]"},
+		{`rest([])`, nil},
+		{`rest()`, "wrong number of arguments. got=0, want=1"},
+		{`rest(1, 2)`, "wrong number of arguments. got=2, want=1"},
+		{`rest(1)`, "argument to `rest` must be Array, got INTEGER"},
+		{`let a = [1, 2]; rest(a);`, "[2]"},
+		{`let a = [1, 2]; rest(a); a;`, "[1, 2]"},
+		{`let a = [1, 2, 3, 4]; rest(rest(rest(rest(a))))`, "[]"},
+		{`let a = [1, 2, 3, 4]; rest(rest(a))`, "[3, 4]"},
+		{`let a = [1, 2]; push(a, 3)`, "[1, 2, 3]"},
+		{`let a = [1, 2]; push(a, 3); a;`, "[1, 2]"},
+		{`let a = [1, 2]; push(a, true)`, "[1, 2, true]"},
+		{`let a = []; push(a, 3)`, "[3]"},
+		{`let a = ["foo", "bar"]; push(a, 3)`, `["foo", "bar", 3]`},
+		{`let a = ["foo", "bar"]; let b = [1, 2]; push(a, b)`, `["foo", "bar", [1, 2]]`},
 	}
 
 	for _, tt := range tests {
 		evaluated := testEval(tt.input)
 
-		switch expected := tt.expected.(type) {
-		case int:
-			testIntegerObject(t, evaluated, int64(expected))
-		case string:
-			errObj, ok := evaluated.(*object.Error)
-			if !ok {
-				t.Errorf("object is not Error. got=%T (%+v)", evaluated, evaluated)
-				continue
+		switch evaluated := evaluated.(type) {
+		case *object.Integer:
+			if expected, ok := tt.expected.(int); ok {
+				testIntegerObject(t, evaluated, int64(expected))
+			} else {
+				t.Errorf("evaluated must not be object.Integer.")
 			}
-			if errObj.Message != expected {
-				t.Errorf("wrong error message. expected=%q, got=%q", expected, errObj.Message)
+		case *object.String:
+			if expected, ok := tt.expected.(string); ok {
+				testStringObject(t, evaluated, expected)
+			} else {
+				t.Errorf("evaluated must not be object.String.")
 			}
+		case *object.Array:
+			if expected, ok := tt.expected.(string); ok {
+				testArrayObject(t, evaluated, expected)
+			} else {
+				t.Errorf("evaluated must not be object.Array.")
+			}
+		case *object.Error:
+			if expected, ok := tt.expected.(string); ok {
+				testErrorObject(t, evaluated, expected)
+			} else {
+				t.Errorf("evaluated must not be object.Error.")
+			}
+		}
+	}
+}
+
+func TestArrayLiterals(t *testing.T) {
+	input := "[1, 2 * 2, 3 + 3]"
+
+	evaluated := testEval(input)
+	fn, ok := evaluated.(*object.Array)
+	if !ok {
+		t.Fatalf("object is not Array. got=%T (%+v)", evaluated, evaluated)
+	}
+
+	if len(fn.Elements) != 3 {
+		t.Fatalf("function has wrong parameters. Parameters=%+v", fn.Elements)
+	}
+
+	testIntegerObject(t, fn.Elements[0], 1)
+	testIntegerObject(t, fn.Elements[1], 4)
+	testIntegerObject(t, fn.Elements[2], 6)
+}
+
+func TestArrayIndexExpressions(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected interface{}
+	}{
+		{
+			"[1, 2, 3][0]",
+			1,
+		},
+		{
+			"[1, 2, 3][1]",
+			2,
+		},
+		{
+			"[1, 2, 3][2]",
+			3,
+		},
+		{
+			"let i = 0; [1][i];",
+			1,
+		},
+		{
+			"[1, 2, 3][1 + 1]",
+			3,
+		},
+		{
+			"let myArray = [1, 2, 3]; myArray[0] + myArray[1] + myArray[2];",
+			6,
+		},
+		{
+			"let myArray = [1, 2, 3]; let i = myArray[0]; myArray[i]",
+			2,
+		},
+		{
+			"[1, 2, 3][3]",
+			nil,
+		},
+		{
+			"[1, 2, 3][-1]",
+			nil,
+		},
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(tt.input)
+		integer, ok := tt.expected.(int)
+		if ok {
+			testIntegerObject(t, evaluated, int64(integer))
+		} else {
+			testNullObject(t, evaluated)
 		}
 	}
 }
@@ -364,6 +485,20 @@ func testIntegerObject(t *testing.T, obj object.Object, expected int64) bool {
 	return true
 }
 
+func testStringObject(t *testing.T, obj object.Object, expected string) bool {
+	result, ok := obj.(*object.String)
+	if !ok {
+		t.Errorf("object is not String. got=%T (%+v)", obj, obj)
+		return false
+	}
+	if result.Value != expected {
+		t.Errorf("object has wrong value. got=%q, want=%q", result.Value, expected)
+		return false
+	}
+
+	return true
+}
+
 func testBooleanObject(t *testing.T, obj object.Object, expected bool) bool {
 	result, ok := obj.(*object.Boolean)
 	if !ok {
@@ -378,10 +513,39 @@ func testBooleanObject(t *testing.T, obj object.Object, expected bool) bool {
 	return true
 }
 
+func testArrayObject(t *testing.T, obj object.Object, expected string) bool {
+	result, ok := obj.(*object.Array)
+	if !ok {
+		t.Errorf("object is not Array. got=%T (%+v)", obj, obj)
+		return false
+	}
+	expectedEval := testEval(expected)
+	expectedArray := expectedEval.(*object.Array)
+	if !reflect.DeepEqual(result.Elements, expectedArray.Elements) {
+		t.Errorf("object has wrong value. got=%#v, want=%#v", result.Elements, expectedArray.Elements)
+		return false
+	}
+
+	return true
+}
+
 func testNullObject(t *testing.T, obj object.Object) bool {
 	if obj != NULL {
 		t.Errorf("object is not NULL. got=%T (%+v)", obj, obj)
 		return false
 	}
+	return true
+}
+
+func testErrorObject(t *testing.T, obj object.Object, expected string) bool {
+	result, ok := obj.(*object.Error)
+	if !ok {
+		t.Errorf("object is not String. got=%T (%+v)", obj, obj)
+		return false
+	}
+	if result.Message != expected {
+		t.Errorf("wrong error message. expected=%q, got=%q", expected, result.Message)
+	}
+
 	return true
 }
