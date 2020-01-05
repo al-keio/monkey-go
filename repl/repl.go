@@ -3,17 +3,19 @@ package repl
 import (
 	"bufio"
 	"fmt"
+	"github.com/al-keio/monkey-go/object"
 	"io"
 
+	"github.com/al-keio/monkey-go/evaluator"
 	"github.com/al-keio/monkey-go/lexer"
 	"github.com/al-keio/monkey-go/parser"
-	"github.com/al-keio/monkey-go/token"
 )
 
 const PROMPT = ">> "
 
 func Start(in io.Reader, out io.Writer) {
 	scanner := bufio.NewScanner(in)
+	env := object.NewEnvironment()
 
 	for {
 		fmt.Printf(PROMPT)
@@ -33,11 +35,10 @@ func Start(in io.Reader, out io.Writer) {
 			continue
 		}
 
-		io.WriteString(out, program.String())
-		io.WriteString(out, "\n")
-
-		for tok := l.NextToken(); tok.Type != token.EOF; tok = l.NextToken() {
-			fmt.Printf("%+v\n", tok)
+		evaluated := evaluator.Eval(program, env)
+		if evaluated != nil {
+			io.WriteString(out, evaluated.Inspect())
+			io.WriteString(out, "\n")
 		}
 	}
 }
