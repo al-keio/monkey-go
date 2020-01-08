@@ -61,7 +61,7 @@ func ExpandMacros(program ast.Node, env *object.Environment) ast.Node {
 		args := quoteArgs(callExpression)
 		evalEnv := extendMacroEnv(macro, args)
 
-		evaluated := Eval(macro.Body, evalEnv)
+		evaluated := Eval(macro.Body.Copy(), evalEnv)
 
 		quote, ok := evaluated.(*object.Quote)
 		if !ok {
